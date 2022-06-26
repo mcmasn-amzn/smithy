@@ -417,6 +417,13 @@ public final class SmithyIdlModelSerializer {
         }
 
         @Override
+        @SuppressWarnings("deprecation")
+        public Void setShape(SetShape shape) {
+            shapeWithMembers(shape, Collections.singletonList(shape.getMember()));
+            return null;
+        }
+
+        @Override
         public Void mapShape(MapShape shape) {
             shapeWithMembers(shape, ListUtils.of(shape.getKey(), shape.getValue()));
             return null;

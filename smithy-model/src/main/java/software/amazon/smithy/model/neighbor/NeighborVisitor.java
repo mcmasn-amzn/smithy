@@ -177,6 +177,7 @@ final class NeighborVisitor extends ShapeVisitor.Default<List<Relationship>> imp
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public List<Relationship> setShape(SetShape shape) {
         return ListUtils.of(relationship(shape, RelationshipType.SET_MEMBER, shape.getMember()));
     }

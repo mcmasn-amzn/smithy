@@ -200,6 +200,14 @@ public final class ModelSerializer {
         }
 
         @Override
+        @SuppressWarnings("deprecation")
+        public Node setShape(SetShape shape) {
+            return withTraits(shape, createTypedNode(shape)
+                    .withMember("member", shape.getMember().accept(this)))
+                    .build();
+        }
+
+        @Override
         public Node mapShape(MapShape shape) {
             return withTraits(shape, createTypedNode(shape)
                     .withMember("key", shape.getKey().accept(this))

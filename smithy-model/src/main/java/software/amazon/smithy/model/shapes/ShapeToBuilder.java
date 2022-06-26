@@ -56,6 +56,12 @@ final class ShapeToBuilder implements ShapeVisitor<AbstractShapeBuilder> {
     }
 
     @Override
+    @SuppressWarnings("deprecation")
+    public AbstractShapeBuilder setShape(SetShape shape) {
+        return shape.toBuilder();
+    }
+
+    @Override
     public AbstractShapeBuilder mapShape(MapShape shape) {
         return shape.toBuilder();
     }

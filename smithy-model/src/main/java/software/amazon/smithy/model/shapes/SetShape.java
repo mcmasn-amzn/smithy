@@ -15,12 +15,9 @@
 
 package software.amazon.smithy.model.shapes;
 
-import java.util.Collection;
 import java.util.Optional;
-import java.util.function.Consumer;
-import software.amazon.smithy.model.SourceLocation;
-import software.amazon.smithy.model.traits.Trait;
 import software.amazon.smithy.model.traits.UniqueItemsTrait;
+import software.amazon.smithy.utils.ToSmithyBuilder;
 
 /**
  * Represents a {@code set} shape.
@@ -28,7 +25,9 @@ import software.amazon.smithy.model.traits.UniqueItemsTrait;
  * <p>Sets are deprecated. Use list shapes with the uniqueItems trait instead.
  */
 @Deprecated
-public final class SetShape extends ListShape {
+public final class SetShape extends CollectionShape implements ToSmithyBuilder<SetShape> {
+
+    private volatile ListShape listCopy;
 
     private SetShape(Builder builder) {
         super(builder);
@@ -41,7 +40,7 @@ public final class SetShape extends ListShape {
 
     @Override
     public Builder toBuilder() {
-        return (Builder) builder().from(this).member(getMember());
+        return builder().from(this).member(getMember());
     }
 
     @Override
@@ -59,10 +58,31 @@ public final class SetShape extends ListShape {
         return ShapeType.SET;
     }
 
+    @Override
+    public Optional<ListShape> asListShape() {
+        ListShape list = listCopy;
+
+        if (list == null) {
+            listCopy = list = ListShape.builder()
+                    .id(getId())
+                    .source(getSourceLocation())
+                    .traits(getAllTraits().values())
+                    .member(getMember())
+                    .build();
+        }
+
+        return Optional.of(list);
+    }
+
+    @Override
+    public boolean isListShape() {
+        return true;
+    }
+
     /**
      * Builder used to create a {@link SetShape}.
      */
-    public static final class Builder extends ListShape.Builder {
+    public static final class Builder extends CollectionShape.Builder<Builder, SetShape> {
         @Override
         public SetShape build() {
             return new SetShape(this);
@@ -71,76 +91,6 @@ public final class SetShape extends ListShape {
         @Override
         public ShapeType getShapeType() {
             return ShapeType.SET;
-        }
-
-        @Override
-        public Builder member(MemberShape member) {
-            return (Builder) super.member(member);
-        }
-
-        @Override
-        public Builder member(ShapeId target) {
-            return (Builder) super.member(target);
-        }
-
-        @Override
-        public Builder member(ShapeId target, Consumer<MemberShape.Builder> memberUpdater) {
-            return (Builder) super.member(target, memberUpdater);
-        }
-
-        @Override
-        public Builder id(ShapeId shapeId) {
-            return (Builder) super.id(shapeId);
-        }
-
-        @Override
-        public Builder addMember(MemberShape member) {
-            return (Builder) super.addMember(member);
-        }
-
-        @Override
-        public Builder id(String shapeId) {
-            return (Builder) super.id(shapeId);
-        }
-
-        @Override
-        public Builder source(SourceLocation sourceLocation) {
-            return (Builder) super.source(sourceLocation);
-        }
-
-        @Override
-        public Builder source(String filename, int line, int column) {
-            return (Builder) super.source(filename, line, column);
-        }
-
-        @Override
-        public Builder traits(Collection<Trait> traitsToSet) {
-            return (Builder) super.traits(traitsToSet);
-        }
-
-        @Override
-        public Builder addTraits(Collection<Trait> traitsToAdd) {
-            return (Builder) super.addTraits(traitsToAdd);
-        }
-
-        @Override
-        public Builder addTrait(Trait trait) {
-            return (Builder) super.addTrait(trait);
-        }
-
-        @Override
-        public Builder removeTrait(String traitId) {
-            return (Builder) super.removeTrait(traitId);
-        }
-
-        @Override
-        public Builder removeTrait(ShapeId traitId) {
-            return (Builder) super.removeTrait(traitId);
-        }
-
-        @Override
-        public Builder clearTraits() {
-            return (Builder) super.clearTraits();
         }
     }
 }

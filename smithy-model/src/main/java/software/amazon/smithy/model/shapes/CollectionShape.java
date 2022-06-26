@@ -69,13 +69,13 @@ public abstract class CollectionShape extends Shape {
      * @param <B> Concrete builder type.
      * @param <S> Shape type being created.
      */
-    public abstract static class Builder<B extends Builder<?, ?>, S extends CollectionShape>
+    public abstract static class Builder<B extends Builder<B, S>, S extends CollectionShape>
             extends AbstractShapeBuilder<B, S> {
 
         private MemberShape member;
 
         @Override
-        public B id(ShapeId shapeId) {
+        public final B id(ShapeId shapeId) {
             if (member != null) {
                 // Update the member name so it isn't pointing to the old shape id.
                 member(member.toBuilder().id(shapeId.withMember(member.getMemberName())).build());
@@ -127,7 +127,7 @@ public abstract class CollectionShape extends Shape {
         }
 
         @Override
-        public B addMember(MemberShape member) {
+        public final B addMember(MemberShape member) {
             return member(member);
         }
     }

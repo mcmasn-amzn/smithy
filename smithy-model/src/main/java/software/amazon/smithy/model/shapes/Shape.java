@@ -471,9 +471,11 @@ public abstract class Shape implements FromSourceLocation, Tagged, ToShapeId, Co
     }
 
     /**
-     * @return Returns true if the shape is a {@link ListShape} shape.
+     * @return Returns true if the shape is a {@link ListShape} shape or {@link SetShape}
+     *         since sets are considered lists in Smithy (though note that SetShape does
+     *         not extend from ListShape).
      */
-    public final boolean isListShape() {
+    public boolean isListShape() {
         return getType() == ShapeType.LIST;
     }
 

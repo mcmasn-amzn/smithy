@@ -29,9 +29,10 @@ public interface ShapeVisitor<R> {
 
     R listShape(ListShape shape);
 
+    @SuppressWarnings("OptionalGetWithoutIsPresent")
     @Deprecated
     default R setShape(SetShape shape) {
-        return listShape(shape);
+        return listShape(shape.asListShape().get());
     }
 
     R mapShape(MapShape shape);

@@ -147,6 +147,7 @@ final class ChangeShapeType {
         }
 
         @Override
+        @SuppressWarnings("deprecation")
         public Shape setShape(SetShape shape) {
             if (to != ShapeType.LIST) {
                 throw invalidType(shape, to, "Sets can only be converted to lists.");
