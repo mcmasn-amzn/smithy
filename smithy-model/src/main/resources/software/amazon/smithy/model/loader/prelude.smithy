@@ -13,18 +13,25 @@ timestamp Timestamp
 
 document Document
 
+@boxV1
 boolean Boolean
 
+@boxV1
 byte Byte
 
+@boxV1
 short Short
 
+@boxV1
 integer Integer
 
+@boxV1
 long Long
 
+@boxV1
 float Float
 
+@boxV1
 double Double
 
 @unitType
@@ -169,6 +176,28 @@ structure deprecated {
     /// A description of when the shape was deprecated (e.g., a date or version).
     since: String,
 }
+
+/// Used only in Smithy 1.0 to indicate that a shape is boxed.
+/// This trait cannot be used in Smithy 2.0 models.
+///
+/// When a boxed shape is the target of a member, the member
+/// may or may not contain a value, and the member has no default value.
+@trait(
+    selector: """
+        :test(boolean, byte, short, integer, long, float, double,
+            member > :test(boolean, byte, short, integer, long, float, double))"""
+)
+structure box {}
+
+/// Indicates that a root-level shape was marked with the box trait in Smithy 1.0
+/// allowing Smithy 1.0 implementations to understand the intended nullability
+/// semantics of the root level shape.
+@trait(
+    selector: """
+        :test(boolean, byte, short, integer, long, float, double,
+            member > :test(boolean, byte, short, integer, long, float, double))"""
+)
+structure boxV1 {}
 
 /// Adds documentation to a shape or member using CommonMark syntax.
 @trait

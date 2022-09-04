@@ -1269,18 +1269,25 @@ referenced from within any namespace using a relative shape ID.
 
     document Document
 
+    @boxV1
     boolean Boolean
 
+    @boxV1
     byte Byte
 
+    @boxV1
     short Short
 
+    @boxV1
     integer Integer
 
+    @boxV1
     long Long
 
+    @boxV1
     float Float
 
+    @boxV1
     double Double
 
     /// The single unit type shape, similar to Void and None in other

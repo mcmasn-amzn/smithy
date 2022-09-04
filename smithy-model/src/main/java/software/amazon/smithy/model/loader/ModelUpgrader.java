@@ -32,6 +32,7 @@ import software.amazon.smithy.model.shapes.ShapeType;
 import software.amazon.smithy.model.shapes.StructureShape;
 import software.amazon.smithy.model.traits.AddedDefaultTrait;
 import software.amazon.smithy.model.traits.BoxTrait;
+import software.amazon.smithy.model.traits.BoxV1Trait;
 import software.amazon.smithy.model.traits.ClientOptionalTrait;
 import software.amazon.smithy.model.traits.DefaultTrait;
 import software.amazon.smithy.model.traits.RangeTrait;
@@ -86,7 +87,7 @@ final class ModelUpgrader {
                         });
                     }
                 } else if (fileToVersion.apply(struct) == Version.VERSION_2_0) {
-                    // Path v2 based members with the box trait when necessary in order for v1 based tooling to
+                    // Patch v2 based members with the box trait when necessary in order for v1 based tooling to
                     // correctly interpret a v2 model.
                     for (MemberShape member : struct.getAllMembers().values()) {
                         model.getShape(member.getTarget()).ifPresent(target -> {
@@ -164,10 +165,15 @@ final class ModelUpgrader {
             && !member.hasTrait(DefaultTrait.ID)
             // Don't add the default trait if the member has clientOptional.
             && !member.hasTrait(ClientOptionalTrait.class)
-            // Don't add a @default trait if the member was explicitly boxed in v1.
-            && !member.hasTrait(BoxTrait.ID)
-            // Don't add a @default trait if the targeted shape was explicitly boxed in v1.
-            && !target.hasTrait(BoxTrait.ID);
+            // Don't add a @default trait if the member or target are considered boxed in v1.
+            && memberAndTargetAreNotAlreadyBoxedInV1(member, target);
+    }
+
+    private boolean memberAndTargetAreNotAlreadyBoxedInV1(MemberShape member, Shape target) {
+        return memberAndTargetAreNotAlreadyExplicitlyBoxed(member, target)
+               // Check for the v1box trait to avoid possible ordering issues when loading models and
+               // patching in synthetic box traits on target shapes.
+               && !target.hasTrait(BoxV1Trait.class);
     }
 
     private boolean isDefaultPayload(MemberShape member, Shape target) {
@@ -201,10 +207,8 @@ final class ModelUpgrader {
         return HAD_DEFAULT_VALUE_IN_1_0.contains(target.getType()) || target.isIntEnumShape();
     }
 
-    // Don't upgrade if the member is already boxed somehow (e.g., an in-memory transform already occurred),
-    // and need to add the box trait to the member since it's already on the target.
     private boolean memberAndTargetAreNotAlreadyExplicitlyBoxed(MemberShape member, Shape target) {
-        return !(member.hasTrait(BoxTrait.ID) || target.hasTrait(BoxTrait.ID));
+        return !member.hasTrait(BoxTrait.ID) && !target.hasTrait(BoxTrait.ID);
     }
 
     // If the shape has no box trait but does have the addedDefault trait, then v1 Smithy implementations

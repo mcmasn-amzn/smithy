@@ -88,6 +88,39 @@ public class NullableIndex implements KnowledgeIndex {
         },
 
         /**
+         * Evaluates only default traits on members that are set to their zero value based on Smithy
+         * IDL 1.0 semantics (that is, only looks at shapes that had a zero value in Smithy v1, including byte,
+         * short, integer, long, float, double, and boolean. If a member is marked with addedDefault or with
+         * clientOptional or is in an input structure, then the member is always considered nullable.
+         */
+        @SmithyUnstableApi
+        CLIENT_ZERO_VALUE_V1 {
+            @Override
+            boolean isStructureMemberOptional(StructureShape container, MemberShape member, Shape target) {
+                return container.hasTrait(InputTrait.class)
+                       || CLIENT_ZERO_VALUE_V1_NO_INPUT.isStructureMemberOptional(container, member, target);
+            }
+        },
+
+        /**
+         * Evaluates only default traits on members that are set to their zero value based on Smithy
+         * IDL 1.0 semantics (that is, only looks at shapes that had a zero value in Smithy v1, including byte,
+         * short, integer, long, float, double, and boolean. If a member is marked with addedDefault or with
+         * clientOptional, then the member is always considered nullable.
+         */
+        @SmithyUnstableApi
+        CLIENT_ZERO_VALUE_V1_NO_INPUT {
+            @Override
+            boolean isStructureMemberOptional(StructureShape container, MemberShape member, Shape target) {
+                if (member.hasTrait(AddedDefaultTrait.class) || member.hasTrait(ClientOptionalTrait.class)) {
+                    return true;
+                }
+
+                return !isShapeSetToDefaultZeroValueInV1(member, target);
+            }
+        },
+
+        /**
          * A server, or any other kind of authoritative model consumer
          * that does not honor the {@link InputTrait} and {@link ClientOptionalTrait}.
          *
@@ -170,14 +203,15 @@ public class NullableIndex implements KnowledgeIndex {
     /**
      * Checks if the given shape is optional using Smithy IDL 1.0 semantics.
      *
-     * <p>This means that the default trait is ignored, the required trait
-     * is ignored, and only the box trait and sparse traits are used.
+     * <p>This method does not return the same values that are returned by
+     * {@link #isMemberNullable(MemberShape)}. This method uses 1.0 model
+     * semantics and attempts to detect when a model has been passed though
+     * model assembler upgrades to provide the most accurate v1 nullability
+     * result.
      *
      * <p>Use {@link #isMemberNullable(MemberShape)} to check using Smithy
      * IDL 2.0 semantics that take required, default, and other traits
-     * into account. That method also accurately returns the nullability of
-     * 1.0 members as long as the model it's checking was sent through a
-     * ModelAssembler.
+     * into account with no special 1.0 handling.
      *
      * @param shapeId Shape or shape ID to check.
      * @return Returns true if the shape is nullable.
@@ -198,7 +232,6 @@ public class NullableIndex implements KnowledgeIndex {
             case BYTE:
             case SHORT:
             case INTEGER:
-            case INT_ENUM: // treat INT_ENUM like integer shapes.
             case LONG:
             case FLOAT:
             case DOUBLE:
@@ -219,20 +252,7 @@ public class NullableIndex implements KnowledgeIndex {
 
         switch (container.getType()) {
             case STRUCTURE:
-                if (member.hasTrait(BoxTrait.class)) {
-                    // The box trait is still around in memory and the model hasn't been reserialized,
-                    // then the shape is for sure nullable in v1.
-                    return true;
-                } else if (member.hasTrait(AddedDefaultTrait.class)) {
-                    // If the default trait was added to a member post-hoc, then v1 model semantics should ignore it.
-                    return true;
-                } else if (isNullable(member.getTarget())) {
-                    // Does the target shape still have a box trait in memory and the shape hasn't been reserialized?
-                    // Then it's for sure nullable in v1.
-                    return true;
-                } else {
-                    return !isShapeSetToDefaultZeroValueInV1(member, target);
-                }
+                return isMemberNullable(member, CheckMode.CLIENT_ZERO_VALUE_V1_NO_INPUT);
             case MAP:
                 // Map keys can never be null.
                 if (member.getMemberName().equals("key")) {

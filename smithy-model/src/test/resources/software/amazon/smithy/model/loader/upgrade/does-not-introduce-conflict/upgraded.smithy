@@ -21,6 +21,7 @@ structure Foo {
     customPrimitiveLong: MyPrimitiveLong
 }
 
+@boxV1
 integer BoxedInteger
 
 long MyPrimitiveLong

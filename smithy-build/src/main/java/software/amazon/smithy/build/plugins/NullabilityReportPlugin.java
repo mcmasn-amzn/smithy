@@ -68,6 +68,11 @@ public final class NullabilityReportPlugin implements SmithyBuildPlugin {
                                      index.isMemberNullable(member, NullableIndex.CheckMode.CLIENT));
                     entry.withMember("v2-client-careful",
                                      index.isMemberNullable(member, NullableIndex.CheckMode.CLIENT_CAREFUL));
+                    entry.withMember("v2-client-zero-value",
+                                     index.isMemberNullable(member, NullableIndex.CheckMode.CLIENT_ZERO_VALUE_V1));
+                    entry.withMember("v2-client-zero-value-no-input",
+                                     index.isMemberNullable(member,
+                                                            NullableIndex.CheckMode.CLIENT_ZERO_VALUE_V1_NO_INPUT));
                     entry.withMember("v2-server",
                                      index.isMemberNullable(member, NullableIndex.CheckMode.SERVER));
                     struct.withMember(member.getMemberName(), entry.build());

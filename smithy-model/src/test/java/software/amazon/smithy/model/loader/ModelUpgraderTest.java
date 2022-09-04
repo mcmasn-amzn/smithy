@@ -2,6 +2,7 @@ package software.amazon.smithy.model.loader;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 
 import java.io.IOException;
@@ -16,6 +17,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.hamcrest.Matcher;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import software.amazon.smithy.model.Model;
 import software.amazon.smithy.model.ShapeMatcher;
@@ -26,6 +28,7 @@ import software.amazon.smithy.model.shapes.MemberShape;
 import software.amazon.smithy.model.shapes.ModelSerializer;
 import software.amazon.smithy.model.shapes.ShapeId;
 import software.amazon.smithy.model.traits.BoxTrait;
+import software.amazon.smithy.model.traits.BoxV1Trait;
 import software.amazon.smithy.model.traits.DefaultTrait;
 import software.amazon.smithy.model.validation.Severity;
 import software.amazon.smithy.model.validation.ValidatedResult;
@@ -230,10 +233,8 @@ public class ModelUpgraderTest {
             Pair.of("2-to-1", "booleanRequiredToNullable"),
             Pair.of("2-to-1", "booleanDefaultWithAddedTraitToNullable"),
             Pair.of("2-to-1", "booleanDefaultWithClientOptionalTraitToNullable"),
-            Pair.of("2-to-1", "intEnumSetToZeroValueToNonNullable")
-
-            // This test is currently broken and needs to be fixed in ModelUpgrade.
-            //, Pair.of("2-to-1", "booleanDefaultZeroValueToNonNullablePrelude")
+            Pair.of("2-to-1", "intEnumSetToZeroValueToNonNullable"),
+            Pair.of("2-to-1", "booleanDefaultZeroValueToNonNullablePrelude")
         );
 
         cases.forEach(pair -> {
@@ -273,8 +274,13 @@ public class ModelUpgraderTest {
     private void upgradeAssertions(String name, Model model, Map<String, Boolean> expected, int roundTrip) {
         NullableIndex index = NullableIndex.of(model);
         ShapeId shape = ShapeId.from("smithy.example#Foo$" + name);
+        MemberShape member = model.expectShape(shape, MemberShape.class);
+
         Map<String, Boolean> result = new HashMap<>();
-        result.put("v1", index.isNullable(shape));
+        boolean isBoxed = member.getMemberTrait(model, BoxTrait.class).isPresent();
+        result.put("v1-box", isBoxed);
+        result.put("v1-client-zero-value",
+                   index.isMemberNullable(member, NullableIndex.CheckMode.CLIENT_ZERO_VALUE_V1));
         result.put("v2", index.isMemberNullable(model.expectShape(shape, MemberShape.class)));
 
         String reason = "Expected " + name + " to have nullability of " + expected + " but found "
@@ -282,10 +288,52 @@ public class ModelUpgraderTest {
 
         assertThat(reason, expected, equalTo(result));
 
-        // Check that box-trait style detection works the same as v1 checks in the nullable index. This ensurse that
-        // box style detection even on round-tripped models works as expected.
-        String reasonBox = "Expected box checks to be " + result.get("v1") + " for " + name;
-        assertThat(reasonBox, model.expectShape(shape, MemberShape.class)
-                .getMemberTrait(model, BoxTrait.class).isPresent(), equalTo(result.get("v1")));
+        // Ensure that the deprecated index check using isNullable matches v1-client-zero-value results.
+        boolean isDeprecatedIndexWorking = index.isNullable(member);
+        if (!isDeprecatedIndexWorking == result.get("v1-client-zero-value")) {
+            String reasonBox = "Expected deprecated index checks to be " + result.get("v1") + " for " + name
+                               + "; traits: " + member.getAllTraits() + "; round trip " + roundTrip;
+            Assertions.fail(reasonBox);
+        }
+    }
+
+    // Loading a Smithy 1.0 model and serializing it is lossy if we don't add some way
+    // to indicate that the box trait was present on a root level shape. This test ensures
+    // that the boxV1 trait is added to the shape and then also used when loading a v2
+    // model.
+    @Test
+    public void boxTraitOnRootShapeIsNotLossyWhenRoundTripped() {
+        Model model = Model.assembler()
+                .addUnparsedModel("foo.smithy", "$version: \"1.0\"\n"
+                                                + "namespace smithy.example\n"
+                                                + "@box\n"
+                                                + "integer MyInteger\n"
+                                                + "structure Foo {\n"
+                                                + "    @box\n"
+                                                + "    baz: MyInteger\n"
+                                                +"}\n")
+                .assemble()
+                .unwrap();
+        ShapeId myInteger = ShapeId.from("smithy.example#MyInteger");
+        ShapeId foo = ShapeId.from("smithy.example#Foo");
+        ShapeId fooBaz = ShapeId.from("smithy.example#Foo$baz");
+
+        assertThat(model.expectShape(myInteger).hasTrait(BoxTrait.class), is(true));
+        assertThat(model.expectShape(foo).hasTrait(BoxTrait.class), is(false));
+        assertThat(model.expectShape(fooBaz).hasTrait(BoxTrait.class), is(true));
+
+        Node serialized = ModelSerializer.builder().build().serialize(model);
+        String raw = Node.prettyPrintJson(serialized);
+        Model model2 = Model.assembler()
+                .addUnparsedModel("foo.json", raw)
+                .assemble()
+                .unwrap();
+
+        assertThat(model2.expectShape(myInteger).hasTrait(BoxTrait.class), is(true));
+        assertThat(model2.expectShape(myInteger).hasTrait(BoxV1Trait.class), is(true));
+        assertThat(model2.expectShape(foo).hasTrait(BoxTrait.class), is(false));
+        assertThat(model2.expectShape(fooBaz).hasTrait(BoxV1Trait.class), is(false));
+        // This member gets no synthetic box trait because the target is boxed.
+        assertThat(model2.expectShape(fooBaz).hasTrait(BoxTrait.class), is(false));
     }
 }
