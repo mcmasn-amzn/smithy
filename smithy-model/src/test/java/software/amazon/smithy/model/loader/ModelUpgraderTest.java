@@ -182,10 +182,9 @@ public class ModelUpgraderTest {
 
     private static Matcher<ShapeId> addedDefaultTrait(ValidatedResult<Model> result) {
         return ShapeMatcher.builderFor(MemberShape.class, result)
-                .description("member to have a default trait with warning")
+                .description("member to have a default trait")
                 .addAssertion(member -> member.hasTrait(DefaultTrait.class),
                               member -> "no @default trait")
-                .addEventAssertion(Validator.MODEL_DEPRECATION, Severity.WARNING, "@default")
                 .build();
     }
 

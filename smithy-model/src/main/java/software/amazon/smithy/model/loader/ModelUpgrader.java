@@ -19,13 +19,15 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
-import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import software.amazon.smithy.model.Model;
 import software.amazon.smithy.model.knowledge.NullableIndex;
 import software.amazon.smithy.model.node.BooleanNode;
+import software.amazon.smithy.model.node.Node;
 import software.amazon.smithy.model.node.NumberNode;
 import software.amazon.smithy.model.node.StringNode;
+import software.amazon.smithy.model.shapes.AbstractShapeBuilder;
 import software.amazon.smithy.model.shapes.MemberShape;
 import software.amazon.smithy.model.shapes.Shape;
 import software.amazon.smithy.model.shapes.ShapeType;
@@ -42,6 +44,7 @@ import software.amazon.smithy.model.validation.Severity;
 import software.amazon.smithy.model.validation.ValidatedResult;
 import software.amazon.smithy.model.validation.ValidationEvent;
 import software.amazon.smithy.model.validation.Validator;
+import software.amazon.smithy.utils.SetUtils;
 
 /**
  * Upgrades Smithy models from IDL v1 to IDL v2, specifically taking into
@@ -60,6 +63,14 @@ final class ModelUpgrader {
             ShapeType.FLOAT,
             ShapeType.DOUBLE,
             ShapeType.BOOLEAN);
+
+    private static final Set<ShapeType> SUPPORTS_RANGE_TRAIT_AND_ZERO_VALUE = SetUtils.of(
+            ShapeType.BYTE,
+            ShapeType.SHORT,
+            ShapeType.INTEGER,
+            ShapeType.LONG,
+            ShapeType.FLOAT,
+            ShapeType.DOUBLE);
 
     private final Model model;
     private final List<ValidationEvent> events;
@@ -104,56 +115,17 @@ final class ModelUpgrader {
     private void upgradeV1Member(MemberShape member, Shape target) {
         if (shouldV1MemberHaveDefaultTrait(member, target)) {
             // Add the @default trait to structure members when needed.
-            events.add(ValidationEvent.builder()
-                               .id(Validator.MODEL_DEPRECATION)
-                               .severity(Severity.WARNING)
-                               .shape(member)
-                               .message("Add the @default trait to this member to make it forward compatible with "
-                                        + "Smithy IDL 2.0")
-                               .build());
             MemberShape.Builder builder = member.toBuilder();
             if (target.isBooleanShape()) {
                 builder.addTrait(new DefaultTrait(new BooleanNode(false, builder.getSourceLocation())));
             } else if (target.isBlobShape()) {
                 builder.addTrait(new DefaultTrait(new StringNode("", builder.getSourceLocation())));
-            } else if (isZeroValidDefault(member)) {
+            } else { // Numeric types.
+                patchRangeTraitsBeforeBuilding(target.getType(), target.hasTrait(BoxTrait.ID), builder, events);
                 builder.addTrait(new DefaultTrait(new NumberNode(0, builder.getSourceLocation())));
             }
             shapeUpgrades.add(builder.build());
         }
-    }
-
-    private boolean isZeroValidDefault(MemberShape member) {
-        Optional<RangeTrait> rangeTraitOptional = member.getMemberTrait(model, RangeTrait.class);
-        // No range means 0 is fine.
-        if (!rangeTraitOptional.isPresent()) {
-            return true;
-        }
-        RangeTrait rangeTrait = rangeTraitOptional.get();
-
-        // Min is greater than 0.
-        if (rangeTrait.getMin().isPresent() && rangeTrait.getMin().get().compareTo(BigDecimal.ZERO) > 0) {
-            events.add(ValidationEvent.builder()
-                    .id(Validator.MODEL_DEPRECATION)
-                    .severity(Severity.WARNING)
-                    .shape(member)
-                    .message("Cannot add the @default trait to this member due to a minimum range constraint.")
-                    .build());
-            return false;
-        }
-
-        // Max is less than 0.
-        if (rangeTrait.getMax().isPresent() && rangeTrait.getMax().get().compareTo(BigDecimal.ZERO) < 0) {
-            events.add(ValidationEvent.builder()
-                    .id(Validator.MODEL_DEPRECATION)
-                    .severity(Severity.WARNING)
-                    .shape(member)
-                    .message("Cannot add the @default trait to this member due to a maximum range constraint.")
-                    .build());
-            return false;
-        }
-
-        return true;
     }
 
     private boolean shouldV1MemberHaveDefaultTrait(MemberShape member, Shape target) {
@@ -225,5 +197,90 @@ final class ModelUpgrader {
     // not considered boxed.
     private boolean memberDoesNotHaveDefaultZeroValueTrait(MemberShape member, Shape target) {
         return !NullableIndex.isShapeSetToDefaultZeroValueInV1(member, target);
+    }
+
+    static void patchShapeBeforeBuilding(
+            LoadOperation.DefineShape defineShape,
+            AbstractShapeBuilder<?, ?> builder,
+            List<ValidationEvent> events
+    ) {
+        handleBoxTrait(defineShape, builder);
+
+        // Patch the range trait of root level 1.0 shapes that aren't boxed and have invalid range constraints.
+        if (defineShape.version == Version.VERSION_1_0) {
+            boolean isBoxed = builder.getAllTraits().containsKey(BoxTrait.ID);
+            patchRangeTraitsBeforeBuilding(builder.getShapeType(), isBoxed, builder, events);
+        }
+    }
+
+    private static void handleBoxTrait(LoadOperation.DefineShape defineShape, AbstractShapeBuilder<?, ?> builder) {
+        // Special casing for v1 box traits.
+        if (defineShape.getShapeType() != ShapeType.MEMBER) {
+            if (builder.getAllTraits().containsKey(BoxTrait.ID)) {
+                builder.addTrait(new BoxV1Trait());
+            } else if (builder.getAllTraits().containsKey(BoxV1Trait.ID)) {
+                builder.addTrait(new BoxTrait());
+            }
+        }
+    }
+
+    static void patchRangeTraitsBeforeBuilding(
+            ShapeType targetType,
+            boolean isBoxed,
+            AbstractShapeBuilder<?, ?> builder,
+            List<ValidationEvent> events
+    ) {
+        // If it's boxed, then there is no issue.
+        if (isBoxed
+            // If the range trait isn't present, then there's no issue on this specific shape.
+            || !builder.getAllTraits().containsKey(RangeTrait.ID)
+            // Only modify numeric shapes that can have zero values.
+            || !SUPPORTS_RANGE_TRAIT_AND_ZERO_VALUE.contains(targetType)) {
+            return;
+        }
+
+        // This is a V1 shape that isn't boxed and defines its own range trait.
+        RangeTrait rangeTrait = (RangeTrait) builder.getAllTraits().get(RangeTrait.ID);
+        boolean hasMin = rangeTrait.getMin().isPresent();
+        boolean hasMax = rangeTrait.getMax().isPresent();
+        boolean isMinInvalid = rangeTrait.getMin().filter(m -> m.compareTo(BigDecimal.ZERO) > 0).isPresent();
+        boolean isMaxInvalid = rangeTrait.getMax().filter(m -> m.compareTo(BigDecimal.ZERO) < 0).isPresent();
+
+        // Note that min and max cannot both be invalid because min must be less than max.
+        if ((isMinInvalid && !hasMax) || (isMaxInvalid && !hasMin)) {
+            // Drop the range trait if it no longer has a valid min or max constraint for the zero value.
+            events.add(ValidationEvent.builder()
+                               .id(Validator.MODEL_DEPRECATION)
+                               .severity(Severity.WARNING)
+                               .shapeId(builder.getId())
+                               .sourceLocation(rangeTrait)
+                               .message("Dropping the @range trait because it is not compatible with the "
+                                        + "default zero value of the shape: "
+                                        + Node.printJson(rangeTrait.toNode()))
+                               .build());
+            builder.removeTrait(RangeTrait.ID);
+        } else if (isMinInvalid) {
+            // Drop the min constraint only.
+            events.add(ValidationEvent.builder()
+                               .id(Validator.MODEL_DEPRECATION)
+                               .severity(Severity.WARNING)
+                               .shapeId(builder.getId())
+                               .sourceLocation(rangeTrait)
+                               .message("Removing the min constraint from the @range trait because min value "
+                                        + "is > 0 which is incompatible with the default zero value.")
+                               .build());
+            builder.addTrait(rangeTrait.toBuilder().min(null).build());
+        } else if (isMaxInvalid) {
+            // Drop the max constraint only.
+            events.add(ValidationEvent.builder()
+                               .id(Validator.MODEL_DEPRECATION)
+                               .severity(Severity.WARNING)
+                               .shapeId(builder.getId())
+                               .sourceLocation(rangeTrait)
+                               .message("Removing the max constraint from the @range trait because max value "
+                                        + "is < 0 which is incompatible with the default zero value.")
+                               .build());
+            builder.addTrait(rangeTrait.toBuilder().max(null).build());
+        }
     }
 }
