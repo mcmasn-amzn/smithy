@@ -192,6 +192,45 @@ In ``awsJson1_1``, servers SHOULD only send the error's
 for both protocols. See `Operation error serialization`_ for full details on how to
 deserialize errors for |quoted shape name|.
 
+.. smithy-trait:: aws.protocols#awsQueryError
+.. _aws.protocols#awsQueryError-trait:
+
+------------------------------------------
+``aws.protocols#awsQueryCompatible`` trait
+------------------------------------------
+
+Summary
+    When using ``awsQuery`` protocol, ```awsQueryError`` trait allows a custom code value defined for an error response.
+
+    When migrating from ``awsQuery`` to ``awsJson1_0`` protocol, ``awsQueryCompatible`` trait will continue this behaviour.
+
+Trait selector
+    ``service is([trait|awsJson1_0])``
+
+Value type
+    Annotation trait
+
+.. code-block:: smithy
+
+    $version: "1"
+    use aws.protocols#awsQueryCompatible
+    use aws.protocols#awsQueryError
+    use aws.protocols#awsJson1_0
+
+    @awsQueryCompatible
+    @awsJson1_0
+    service MyService {
+        version: "2020-02-05"
+    }
+
+    @awsQueryError(
+        code: "InvalidThing",
+        httpResponseCode: 400,
+    )
+    @error("client")
+    structure InvalidThingException {
+        message: String
+    }
 
 -------------------------
 Protocol compliance tests
