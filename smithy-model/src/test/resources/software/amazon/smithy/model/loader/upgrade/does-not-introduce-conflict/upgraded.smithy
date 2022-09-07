@@ -10,7 +10,7 @@ structure Foo {
     @default(0)
     alreadyRequired: PrimitiveInteger,
 
-    boxedMember: PrimitiveInteger,
+    boxedMember: PrimitiveInteger = null,
 
     previouslyBoxedTarget: Integer,
 
@@ -21,7 +21,7 @@ structure Foo {
     customPrimitiveLong: MyPrimitiveLong
 }
 
-@boxV1
 integer BoxedInteger
 
+@default(0)
 long MyPrimitiveLong

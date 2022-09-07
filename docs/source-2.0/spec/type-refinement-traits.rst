@@ -15,9 +15,9 @@ type of a shape.
 Summary
     Provides a structure member with a default value.
 Trait selector
-    ``structure > member :test(> :is(simpleType, list, map))``
+    ``:is(simpleType, list, map, structure > member :test(> :is(simpleType, list, map)))``
 
-    A member of a structure that targets a simple type, list, or map.
+    A simple type, list, map, or a member of a structure that targets a simple type, list, or map.
 Value type
     Document type.
 See also
@@ -26,9 +26,9 @@ See also
     * :ref:`clientOptional-trait`
     * :ref:`input-trait`
 
-The ``@default`` trait assigns a default value to a structure member using
-a document type. The following example defines a structure with a "language"
-member that has a default value:
+The ``@default`` trait assigns a default value to a structure member. The
+following example defines a structure with a "language" member that has a
+default value:
 
 .. code-block:: smithy
 
@@ -55,6 +55,39 @@ The above example uses syntactic sugar to apply the ``@default`` trait. The
         @default("en")
         language: Language
     }
+
+The ``@default`` trait can be added to root-level simple types, lists, or
+maps. This can serve as a kind of template to enforce default values across
+structure members in a model. Any structure member that targets a shape
+marked with ``@default`` MUST also add a matching ``@default`` trait to the
+member.
+
+.. code-block:: smithy
+
+    @default(0)
+    integer ZeroValueInteger
+
+    structure Message {
+        zeroValueInteger: ZeroValueInteger = 0 // must be repeated and match the target.
+    }
+
+The ``@default`` trait on a structure member can be set to ``null`` to
+explicitly indicate that the member is optional or to override the default
+value requirement of a targeted shape.
+
+.. code-block:: smithy
+
+    @default(0)
+    integer ZeroValueInteger
+
+    structure Message {
+        zeroValueInteger: ZeroValueInteger = null // forces the member to be optional
+    }
+
+.. note::
+
+    The ``@default`` trait on root-level shapes has no impact when targeted by
+    any other shape than a structure.
 
 
 Default value constraints
@@ -91,6 +124,11 @@ property was omitted.
 
 Updating default values
 -----------------------
+
+The default value of a root-level shape MUST NOT be changed nor can the default
+trait be added or removed from an existing shape. Changing the default value of
+a root level shape would cause any member reference to the shape to break and
+could inadvertently impact code generated types for the shape.
 
 The default value of a member SHOULD NOT be changed. However, it MAY be
 necessary in extreme cases to change a default value if changing the default

@@ -115,9 +115,11 @@ public class NullableIndexTest {
                 // Nullable because the target is boxed
                 .addMember("b", ShapeId.from("smithy.api#Boolean"))
                 // Nullable because the member is boxed
-                .addMember("c", ShapeId.from("smithy.api#PrimitiveBoolean"), b -> b.addTrait(new BoxTrait()))
-                // Nullable because we don't know if this is a 1.0 or 2.0 model.
-                .addMember("d", ShapeId.from("smithy.api#PrimitiveBoolean"))
+                .addMember("c", ShapeId.from("smithy.api#PrimitiveBoolean"),
+                           b -> b.addTrait(new DefaultTrait(Node.nullNode())))
+                // Non-nullable due to the default trait with a zero value.
+                .addMember("d", ShapeId.from("smithy.api#PrimitiveBoolean"),
+                           b -> b.addTrait(new DefaultTrait(Node.from(false))))
                 .addMember("e", ShapeId.from("smithy.api#Document"))
                 .build();
 
@@ -169,7 +171,7 @@ public class NullableIndexTest {
                 {model, structure.getMember("a").get().getId().toString(), true},
                 {model, structure.getMember("b").get().getId().toString(), true},
                 {model, structure.getMember("c").get().getId().toString(), true},
-                {model, structure.getMember("d").get().getId().toString(), true},
+                {model, structure.getMember("d").get().getId().toString(), false},
                 // documents are nullable as structure members
                 {model, structure.getMember("e").get().getId().toString(), true},
         });

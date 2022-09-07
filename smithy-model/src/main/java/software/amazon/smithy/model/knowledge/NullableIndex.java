@@ -135,14 +135,15 @@ public class NullableIndex implements KnowledgeIndex {
         SERVER {
             @Override
             boolean isStructureMemberOptional(StructureShape container, MemberShape member, Shape target) {
-                // A member with the default trait is never nullable. Note that even 1.0 models will be
-                // assigned a default trait when they are "upgraded".
-                if (member.hasTrait(DefaultTrait.class)) {
+                // Defaults set to null on a member make the member optional.
+                if (member.hasNullDefault()) {
+                    return true;
+                } else if (member.hasNonNullDefault()) {
                     return false;
+                } else {
+                    // A 2.0 member with the required trait is never nullable.
+                    return !member.hasTrait(RequiredTrait.class);
                 }
-
-                // A 2.0 member with the required trait is never nullable.
-                return !member.hasTrait(RequiredTrait.class);
             }
         };
 
@@ -277,12 +278,31 @@ public class NullableIndex implements KnowledgeIndex {
      */
     @SmithyUnstableApi
     public static boolean isShapeSetToDefaultZeroValueInV1(MemberShape member, Shape target) {
-        if (!member.hasTrait(DefaultTrait.ID)) {
+        DefaultTrait memberDefault = member.getTrait(DefaultTrait.class).orElse(null);
+        Node defaultValue = memberDefault == null ? null : memberDefault.toNode();
+
+        // No default or null default values on members are considered nullable.
+        if (defaultValue == null || defaultValue.isNullNode()) {
             return false;
         }
 
         ShapeType targetType = target.getType();
-        Node defaultValue = member.getAllTraits().get(DefaultTrait.ID).toNode();
+        return isDefaultZeroValueOfTypeInV1(defaultValue, targetType);
+    }
+
+    /**
+     * Detects if the given node value equals the default value of the given shape type
+     * based on Smithy 1.0 semantics.
+     *
+     * @param defaultValue Value to check.
+     * @param targetType Shape type to check against.
+     * @return Returns true if the value is the v1 zero value of the type.
+     */
+    @SmithyUnstableApi
+    public static boolean isDefaultZeroValueOfTypeInV1(Node defaultValue, ShapeType targetType) {
+        if (defaultValue == null) {
+            return false;
+        }
 
         switch (targetType) {
             case BOOLEAN:

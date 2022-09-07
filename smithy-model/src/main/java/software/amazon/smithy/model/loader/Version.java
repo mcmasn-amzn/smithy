@@ -19,7 +19,6 @@ import software.amazon.smithy.model.node.Node;
 import software.amazon.smithy.model.shapes.ShapeId;
 import software.amazon.smithy.model.shapes.ShapeType;
 import software.amazon.smithy.model.traits.BoxTrait;
-import software.amazon.smithy.model.traits.BoxV1Trait;
 import software.amazon.smithy.model.traits.DefaultTrait;
 import software.amazon.smithy.model.traits.MixinTrait;
 
@@ -109,8 +108,6 @@ enum Version {
                                              target, this);
             } else if (traitId.equals(DefaultTrait.ID)) {
                 errorMessage = "The @default trait can only be used in Smithy 2.0 or later";
-            } else if (traitId.equals(BoxV1Trait.ID)) {
-                errorMessage = "The @boxV1 trait can only be used in Smithy 2.0 or later";
             }
 
             if (errorMessage != null) {

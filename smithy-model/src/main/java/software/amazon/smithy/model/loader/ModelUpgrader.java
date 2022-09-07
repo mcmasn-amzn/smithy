@@ -17,28 +17,33 @@ package software.amazon.smithy.model.loader;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
+import software.amazon.smithy.model.FromSourceLocation;
 import software.amazon.smithy.model.Model;
 import software.amazon.smithy.model.knowledge.NullableIndex;
+import software.amazon.smithy.model.node.ArrayNode;
 import software.amazon.smithy.model.node.BooleanNode;
 import software.amazon.smithy.model.node.Node;
+import software.amazon.smithy.model.node.NullNode;
 import software.amazon.smithy.model.node.NumberNode;
+import software.amazon.smithy.model.node.ObjectNode;
 import software.amazon.smithy.model.node.StringNode;
 import software.amazon.smithy.model.shapes.AbstractShapeBuilder;
 import software.amazon.smithy.model.shapes.MemberShape;
 import software.amazon.smithy.model.shapes.Shape;
+import software.amazon.smithy.model.shapes.ShapeId;
 import software.amazon.smithy.model.shapes.ShapeType;
 import software.amazon.smithy.model.shapes.StructureShape;
 import software.amazon.smithy.model.traits.AddedDefaultTrait;
 import software.amazon.smithy.model.traits.BoxTrait;
-import software.amazon.smithy.model.traits.BoxV1Trait;
-import software.amazon.smithy.model.traits.ClientOptionalTrait;
 import software.amazon.smithy.model.traits.DefaultTrait;
 import software.amazon.smithy.model.traits.RangeTrait;
 import software.amazon.smithy.model.traits.StreamingTrait;
+import software.amazon.smithy.model.traits.Trait;
 import software.amazon.smithy.model.transform.ModelTransformer;
 import software.amazon.smithy.model.validation.Severity;
 import software.amazon.smithy.model.validation.ValidatedResult;
@@ -71,6 +76,16 @@ final class ModelUpgrader {
             ShapeType.LONG,
             ShapeType.FLOAT,
             ShapeType.DOUBLE);
+
+    // Box traits have potentially not been patched in yet, so track the prelude shapes that were boxed in v1.
+    private static final Set<ShapeId> HAD_BOX_IN_PRELUDE_IN_V1 = SetUtils.of(
+            ShapeId.from("smithy.api#Boolean"),
+            ShapeId.from("smithy.api#Byte"),
+            ShapeId.from("smithy.api#Short"),
+            ShapeId.from("smithy.api#Integer"),
+            ShapeId.from("smithy.api#Long"),
+            ShapeId.from("smithy.api#Float"),
+            ShapeId.from("smithy.api#Double"));
 
     private final Model model;
     private final List<ValidationEvent> events;
@@ -114,16 +129,20 @@ final class ModelUpgrader {
 
     private void upgradeV1Member(MemberShape member, Shape target) {
         if (shouldV1MemberHaveDefaultTrait(member, target)) {
-            // Add the @default trait to structure members when needed.
+            // Add the @default trait to structure members when the target shapes in V1 models have an
+            // implicit default trait due to a zero value (e.g., PrimitiveInteger).
             MemberShape.Builder builder = member.toBuilder();
-            if (target.isBooleanShape()) {
-                builder.addTrait(new DefaultTrait(new BooleanNode(false, builder.getSourceLocation())));
-            } else if (target.isBlobShape()) {
-                builder.addTrait(new DefaultTrait(new StringNode("", builder.getSourceLocation())));
-            } else { // Numeric types.
+            Node defaultValue = getDefaultValueOfType(member, target.getType());
+            // Patch the default value of numeric types if the range trait isn't compatible with the zero value.
+            if (defaultValue.isNumberNode()) {
                 patchRangeTraitsBeforeBuilding(target.getType(), target.hasTrait(BoxTrait.ID), builder, events);
-                builder.addTrait(new DefaultTrait(new NumberNode(0, builder.getSourceLocation())));
             }
+            builder.addTrait(new DefaultTrait(defaultValue));
+            shapeUpgrades.add(builder.build());
+        } else if (member.hasTrait(BoxTrait.class)) {
+            // Add a default trait to the member set to null to indicate it was boxed in v1.
+            MemberShape.Builder builder = member.toBuilder();
+            builder.addTrait(new DefaultTrait(Node.nullNode()));
             shapeUpgrades.add(builder.build());
         }
     }
@@ -135,17 +154,8 @@ final class ModelUpgrader {
         return (HAD_DEFAULT_VALUE_IN_1_0.contains(target.getType()) || isDefaultPayload(member, target))
             // Don't re-add the @default trait
             && !member.hasTrait(DefaultTrait.ID)
-            // Don't add the default trait if the member has clientOptional.
-            && !member.hasTrait(ClientOptionalTrait.class)
             // Don't add a @default trait if the member or target are considered boxed in v1.
-            && memberAndTargetAreNotAlreadyBoxedInV1(member, target);
-    }
-
-    private boolean memberAndTargetAreNotAlreadyBoxedInV1(MemberShape member, Shape target) {
-        return memberAndTargetAreNotAlreadyExplicitlyBoxed(member, target)
-               // Check for the v1box trait to avoid possible ordering issues when loading models and
-               // patching in synthetic box traits on target shapes.
-               && !target.hasTrait(BoxV1Trait.class);
+            && memberAndTargetAreNotAlreadyExplicitlyBoxed(member, target);
     }
 
     private boolean isDefaultPayload(MemberShape member, Shape target) {
@@ -159,18 +169,26 @@ final class ModelUpgrader {
     }
 
     private void patchV2MemberForV1Support(MemberShape member, Shape target) {
-        // Only apply box to members where the trait can be applied.
-        if (canBoxTargetThisKindOfShape(target) && memberAndTargetAreNotAlreadyExplicitlyBoxed(member, target)) {
-            if (isMemberInherentlyBoxedInV1(member) || memberDoesNotHaveDefaultZeroValueTrait(member, target)) {
-                // The member should be considered boxed by v1 implementations:
-                // * The member can be boxed.
-                // * The member isn't already boxed based on the member or target shape. v1 implementations will
-                //   already look to the target for the box trait.
-                // * It has no default zero value. It might have a default, but if the default isn't the zero
-                //   value, then it's ignored by v1 implementations.
-                shapeUpgrades.add(member.toBuilder().addTrait(new BoxTrait()).build());
-            }
+        if (!canBoxTargetThisKindOfShape(target)) {
+            return;
         }
+
+        if (!memberDoesNotHaveDefaultZeroValueTrait(member, target)) {
+            return;
+        }
+
+        if (member.hasNullDefault() || v2ShapeNeedsBoxTrait(member, target)) {
+            // Add a synthetic box trait to the member because either:
+            // * it's default value is set to null.
+            // * it has the addedDefault trait.
+            // * it not already explicitly boxed
+            shapeUpgrades.add(member.toBuilder().addTrait(new BoxTrait()).build());
+        }
+    }
+
+    private boolean v2ShapeNeedsBoxTrait(MemberShape member, Shape target) {
+        return isMemberInherentlyBoxedInV1(member)
+               && memberAndTargetAreNotAlreadyExplicitlyBoxed(member, target);
     }
 
     // Only apply box to members where the trait can be applied. Note that intEnum is treated
@@ -180,16 +198,15 @@ final class ModelUpgrader {
     }
 
     private boolean memberAndTargetAreNotAlreadyExplicitlyBoxed(MemberShape member, Shape target) {
-        return !member.hasTrait(BoxTrait.ID) && !target.hasTrait(BoxTrait.ID);
+        return !member.hasTrait(BoxTrait.ID)
+               && !target.hasTrait(BoxTrait.ID)
+               && !HAD_BOX_IN_PRELUDE_IN_V1.contains(target.getId());
     }
 
-    // If the shape has no box trait but does have the addedDefault trait, then v1 Smithy implementations
-    // should consider the member boxed because the default trait was added after initially shipping the
-    // member. The same is true for the clientOptional trait -- it's a requirement for v2 client generators to
-    // make the shape optional, and since v1 generators don't use the updated nullability semantics, this
-    // trait should make all v1 implementations treat the member as nullable.
+    // The addedDefault trait implies that a member did not previously have a default, and a default value
+    // was added later. In this case, naive box implementation can assume the member is boxed.
     private boolean isMemberInherentlyBoxedInV1(MemberShape member) {
-        return member.hasTrait(AddedDefaultTrait.class) || member.hasTrait(ClientOptionalTrait.class);
+        return member.hasTrait(AddedDefaultTrait.class);
     }
 
     // If the member has a default trait set to the zero value, then consider the member
@@ -204,7 +221,7 @@ final class ModelUpgrader {
             AbstractShapeBuilder<?, ?> builder,
             List<ValidationEvent> events
     ) {
-        handleBoxTrait(defineShape, builder);
+        handleBoxing(defineShape, builder);
 
         // Patch the range trait of root level 1.0 shapes that aren't boxed and have invalid range constraints.
         if (defineShape.version == Version.VERSION_1_0) {
@@ -213,18 +230,69 @@ final class ModelUpgrader {
         }
     }
 
-    private static void handleBoxTrait(LoadOperation.DefineShape defineShape, AbstractShapeBuilder<?, ?> builder) {
-        // Special casing for v1 box traits.
-        if (defineShape.getShapeType() != ShapeType.MEMBER) {
-            if (builder.getAllTraits().containsKey(BoxTrait.ID)) {
-                builder.addTrait(new BoxV1Trait());
-            } else if (builder.getAllTraits().containsKey(BoxV1Trait.ID)) {
+    private static void handleBoxing(LoadOperation.DefineShape defineShape, AbstractShapeBuilder<?, ?> builder) {
+        // Only need to modify shapes that had a zero value in v1.
+        if (!HAD_DEFAULT_VALUE_IN_1_0.contains(builder.getShapeType())) {
+            return;
+        }
+
+        // Special casing to add synthetic box traits onto root level shapes for v1 compatibility.
+        if (defineShape.version == Version.VERSION_1_0) {
+            // Add default traits to shapes that support them.
+            if (!isBuilderBoxed(builder)) {
+                Node defaultZeroValue = getDefaultValueOfType(builder, builder.getShapeType());
+                DefaultTrait syntheticDefault = new DefaultTrait(defaultZeroValue);
+                builder.addTrait(syntheticDefault);
+            }
+        } else if (defineShape.version == Version.VERSION_2_0) {
+            // Add the box trait to root level shapes not marked with the default trait, or that are marked with
+            // the default trait, and it isn't set to the zero value of a v1 type.
+            Trait defaultTrait = builder.getAllTraits().get(DefaultTrait.ID);
+            Node defaultValue = defaultTrait == null ? null : defaultTrait.toNode();
+            boolean isDefaultZeroValue = NullableIndex
+                    .isDefaultZeroValueOfTypeInV1(defaultValue, defineShape.getShapeType());
+            if (!isDefaultZeroValue) {
                 builder.addTrait(new BoxTrait());
             }
         }
     }
 
-    static void patchRangeTraitsBeforeBuilding(
+    private static boolean isBuilderBoxed(AbstractShapeBuilder<?, ?> builder) {
+        return HAD_BOX_IN_PRELUDE_IN_V1.contains(builder.getId()) || builder.getAllTraits().containsKey(BoxTrait.ID);
+    }
+
+    private static Node getDefaultValueOfType(FromSourceLocation sourceLocation, ShapeType type) {
+        // Includes all possible types that support default values, though this class currently uses only
+        // boolean, numeric types, and blobs.
+        switch (type) {
+            case BOOLEAN:
+                return new BooleanNode(false, sourceLocation.getSourceLocation());
+            case BYTE:
+            case SHORT:
+            case INTEGER:
+            case INT_ENUM:
+            case LONG:
+            case FLOAT:
+            case DOUBLE:
+            case BIG_DECIMAL:
+            case BIG_INTEGER:
+                return new NumberNode(0, sourceLocation.getSourceLocation());
+            case BLOB:
+            case STRING:
+                return new StringNode("", sourceLocation.getSourceLocation());
+            case LIST:
+            case SET:
+                return new ArrayNode(Collections.emptyList(), sourceLocation.getSourceLocation());
+            case MAP:
+                return new ObjectNode(Collections.emptyMap(), sourceLocation.getSourceLocation());
+            case DOCUMENT:
+                return new NullNode(sourceLocation.getSourceLocation());
+            default:
+                throw new UnsupportedOperationException("Unexpected shape type: " + type);
+        }
+    }
+
+    private static void patchRangeTraitsBeforeBuilding(
             ShapeType targetType,
             boolean isBoxed,
             AbstractShapeBuilder<?, ?> builder,
