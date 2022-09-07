@@ -26,6 +26,7 @@ import software.amazon.smithy.model.node.ExpectationNotMetException;
 import software.amazon.smithy.model.node.Node;
 import software.amazon.smithy.model.shapes.MemberShape;
 import software.amazon.smithy.model.shapes.Shape;
+import software.amazon.smithy.model.shapes.ShapeType;
 import software.amazon.smithy.model.traits.DefaultTrait;
 import software.amazon.smithy.model.validation.AbstractValidator;
 import software.amazon.smithy.model.validation.NodeValidationVisitor;
@@ -56,20 +57,24 @@ public final class DefaultTraitValidator extends AbstractValidator {
                     MemberShape member = rel.getShape().asMemberShape().orElseThrow(() -> {
                         return new ExpectationNotMetException("Expected shape to be a member", rel.getShape());
                     });
-                    DefaultTrait memberDefault = member.getTrait(DefaultTrait.class).orElse(null);
-                    if (memberDefault == null) {
-                        events.add(error(member, String.format(
-                                "Member targets %s, which requires that the member defines the same default of `%s`",
-                                shape.toShapeId(), Node.printJson(value))));
-                    } else if (!memberDefault.toNode().isNullNode()
-                               && !value.equals(member.expectTrait(DefaultTrait.class).toNode())) {
-                        // The member trait is not set to null nor does it match the target defualt.
-                        events.add(error(member, String.format(
-                                "Member defines a default value that differs from the default value of the target "
-                                + "shape, %s. The member has a default of `%s`, but the target has a default of `%s`.",
-                                shape.toShapeId(),
-                                member.expectTrait(DefaultTrait.class).toNode(),
-                                Node.printJson(value))));
+                    if (model.expectShape(member.getContainer()).getType() == ShapeType.STRUCTURE) {
+                        DefaultTrait memberDefault = member.getTrait(DefaultTrait.class).orElse(null);
+                        if (memberDefault == null) {
+                            events.add(error(member, String.format(
+                                    "Member targets %s, which requires that the member defines the same default "
+                                    + "of `%s`",
+                                    shape.toShapeId(), Node.printJson(value))));
+                        } else if (!memberDefault.toNode().isNullNode()
+                                   && !value.equals(member.expectTrait(DefaultTrait.class).toNode())) {
+                            // The member trait is not set to null nor does it match the target defualt.
+                            events.add(error(member, String.format(
+                                    "Member defines a default value that differs from the default value of the "
+                                    + "target shape, %s. The member has a default of `%s`, but the target has a "
+                                    + "default of `%s`.",
+                                    shape.toShapeId(),
+                                    member.expectTrait(DefaultTrait.class).toNode(),
+                                    Node.printJson(value))));
+                        }
                     }
                 }
             }
