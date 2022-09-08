@@ -86,8 +86,9 @@ value requirement of a targeted shape.
 
 .. note::
 
-    The ``@default`` trait on root-level shapes has no impact when targeted by
-    any other shape than a structure.
+    * The ``@default`` trait on root-level shapes has no impact when targeted by
+      any other shape than a structure.
+    * The ``@default`` trait on root-level shapes cannot be set to ``null``.
 
 
 Default value constraints

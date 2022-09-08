@@ -46,6 +46,29 @@ public class ChangedNullabilityTest {
     }
 
     @Test
+    public void addingDefaultWithRequiredTraitIsOk() {
+        StringShape s = StringShape.builder().id("smithy.example#Str").build();
+        StructureShape a = StructureShape.builder()
+                .id("smithy.example#A")
+                .addMember("foo", s.getId(), b1 -> b1.addTrait(new DefaultTrait(Node.from(""))))
+                .build();
+        StructureShape b = StructureShape.builder()
+                .id("smithy.example#A")
+                .addMember("foo", s.getId(), b2 -> {
+                    b2.addTrait(new RequiredTrait());
+                    b2.addTrait(new DefaultTrait(Node.from("")));
+                })
+                .build();
+        Model model1 = Model.builder().addShapes(s, a).build();
+        Model model2 = Model.builder().addShapes(s, b).build();
+        ModelDiff.Result result = ModelDiff.builder().oldModel(model1).newModel(model2).compare();
+
+        assertThat(result.getDiffEvents().stream()
+                           .filter(event -> event.getId().equals("ChangedNullability"))
+                           .count(), equalTo(0L));
+    }
+
+    @Test
     public void detectsInvalidAdditionOfDefaultTrait() {
         StringShape s = StringShape.builder().id("smithy.example#Str").build();
         StructureShape a = StructureShape.builder()

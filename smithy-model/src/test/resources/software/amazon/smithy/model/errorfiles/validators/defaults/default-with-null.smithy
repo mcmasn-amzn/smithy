@@ -6,3 +6,6 @@ structure Foo {
     integer: PrimitiveInteger = null
     explicitNull: Integer = null
 }
+
+@default(null) // invalid default trait
+integer NullableInteger

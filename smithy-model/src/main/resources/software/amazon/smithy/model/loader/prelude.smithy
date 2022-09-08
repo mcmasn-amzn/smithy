@@ -283,13 +283,7 @@ structure httpApiKeyAuth {
 ///
 /// This trait can currently only be used in Smithy 2.0 models.
 @trait(
-    selector: ":is(simpleType, list, map, structure > member :test(> :is(simpleType, list, map)))",
-    // The default trait can never be removed. It can only be added to members that were previously
-    // marked as required and the @addedDefault trait is added.
-    breakingChanges: [
-        {change: "remove"},
-        {change: "update", severity: "DANGER", message: "Default values should only be changed when absolutely necessary."}
-    ]
+    selector: ":is(simpleType, list, map, structure > member :test(> :is(simpleType, list, map)))"
 )
 document default
 

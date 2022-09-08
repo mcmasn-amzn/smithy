@@ -96,12 +96,14 @@ public final class DefaultTraitValidator extends AbstractValidator {
 
         if (shape.isMemberShape()) {
             shapeTarget = model.expectShape(shape.asMemberShape().get().getTarget());
-
             // Any member can set the default to null, overriding the default of the target shape
             // causing the member to be considered nullable.
             if (value.isNullNode()) {
                 return visitor;
             }
+        } else if (value.isNullNode()) {
+            events.add(error(shape, trait, "The @default trait can only be set to null on members"));
+            return visitor;
         }
 
         events.addAll(shape.accept(visitor));
