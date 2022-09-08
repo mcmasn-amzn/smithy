@@ -275,4 +275,34 @@ public class ChangedNullabilityTest {
         // No events should have been emitted for the addition of the backward compatible box trait.
         assertThat(events, empty());
     }
+
+    @Test
+    public void roundTrippedV1ModelHasNoEvents() {
+        String originalModel =
+                "$version: \"1.0\"\n"
+                + "namespace smithy.example\n"
+                + "integer MyPrimitiveInteger\n"
+                + "@box\n"
+                + "integer MyBoxedInteger\n"
+                + "structure Foo {\n"
+                + "    a: MyPrimitiveInteger,\n"
+                + "    @box\n"
+                + "    b: MyPrimitiveInteger,\n"
+                + "    c: MyBoxedInteger,\n"
+                + "    @box\n"
+                + "    d: MyBoxedInteger,\n"
+                + "}\n";
+        Model oldModel = Model.assembler().addUnparsedModel("test.smithy", originalModel).assemble().unwrap();
+
+        // Round trip the v1 model and make sure there are no diff events.
+        String unparsedNew = Node.prettyPrintJson(ModelSerializer.builder().build().serialize(oldModel));
+        Model newModel = Model.assembler()
+                .addUnparsedModel("test.json", unparsedNew)
+                .assemble()
+                .unwrap();
+
+        List<ValidationEvent> events = ModelDiff.compare(oldModel, newModel);
+
+        assertThat(events, empty());
+    }
 }
